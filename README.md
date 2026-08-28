@@ -99,8 +99,9 @@ re-sent once every `notify_cooldown_days` (default 1 day) per tape.
 
 ## How tape lifecycle is tracked
 
-```
-unknown -> in_library -> exported_pending_pickup -> external -> returned -> in_library -> ...
+```mermaid
+graph
+A(unknown) --> B[in_library] --> C[exported_pending_pickup] --> D[external] --> E[returned] --> B
 ```
 
 - **in_library**: seen in a changer slot or drive right now.
