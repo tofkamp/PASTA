@@ -9,9 +9,7 @@ operator when tapes need to be picked up or are overdue to come back.
 ### 1. Create the PBS user, API token, and permissions
 
 Run these on the PBS host itself (as root, or via `pveproxy`/`pbs` shell
-access). Note this uses `proxmox-backup-manager`, not `proxmox-tape` —
-`proxmox-tape` is only for tape drive/media operations; user, token, and
-ACL management live in `proxmox-backup-manager`.
+access). 
 
 ```bash
 # create a dedicated user to hold the token
@@ -26,15 +24,6 @@ proxmox-backup-manager user generate-token tape-admin@pbs tape-reader \
 proxmox-backup-manager acl update /tape TapeReader --auth-id 'tape-admin@pbs!tape-reader'
 ```
 
-> **Note on the `TapeReader` role:** per PBS's built-in roles, `TapeReader`
-> is described as "can read and inspect tape configuration and media
-> content" — it's not explicitly documented as covering the *write*
-> actions this tool performs (`load-media`, `unload`, `clean`). If
-> `process-exports` fails with a permission error, re-run the `acl update`
-> above with `TapeOperator` instead ("can do tape backup/restore, cannot
-> change configuration") — that's the smallest built-in role PBS documents
-> as covering physical tape operations. `TapeAdmin` also works but grants
-> configuration-changing rights this tool doesn't need.
 
 ### 2. Configure the tool
 
@@ -88,7 +77,7 @@ everything).
 ## Suggested cron
 
 ```cron
-*/15 * * * *  cd /opt/tape_admin && ./tape_admin.py run        >> run.log 2>&1
+45 7 * * *  cd /opt/tape_admin && ./tape_admin.py run        >> run.log 2>&1
 0 8   * * *   cd /opt/tape_admin && ./tape_admin.py check-overdue >> run.log 2>&1
 ```
 
