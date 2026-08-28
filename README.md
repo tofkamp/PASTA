@@ -1,9 +1,20 @@
-# PBS Tape Administration Tool
+# PBS Assistance Service for Tape Administration
+(PBS Tape Administration Tool)
 
 Tracks tape media leaving and returning to your Proxmox Backup Server tape
 library, stages exported tapes in the changer's mailslots, and emails the
 operator when tapes need to be picked up or are overdue to come back.
 
+Features
+- Selects and move tapes to mailslots for external storage
+- Monitors single or multiple mediapools for full tapes
+- Send mail requesting which tapes to return
+- Monitor read/write errors
+- Monitor wearing of tapes
+- Autoclean tape drive if needed
+- Upgradable database
+- Only TapeReader permission needed
+ 
 ## Setup
 
 ### 1. Create the PBS user, API token, and permissions
