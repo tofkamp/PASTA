@@ -7,13 +7,15 @@ operator when tapes need to be picked up or are overdue to come back.
 
 Features
 - Selects and move tapes to mailslots for external storage
-- Monitors single or multiple mediapools for full tapes
+- Monitors single or multiple mediapools for full tapes to process
 - Send mail requesting which tapes to return
 - Monitor read/write errors
 - Monitor wearing of tapes
-- Autoclean tape drive if needed
-- Upgradable database
-- Only TapeReader permission needed
+- Optional autoclean tape drive if needed
+- Automatic upgrade of database
+- Don't do anything if an other tape is in the drive
+- Logging of every event
+- Only TapeReader token permission needed on PBX
  
 ## Setup
 
