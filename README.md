@@ -27,6 +27,8 @@ access).
 ```bash
 # create a dedicated user to hold the token
 proxmox-backup-manager user create tape-admin@pbs --email tape-admin@example.com
+# grant the user the TapeReader role on /tape
+proxmox-backup-manager acl update /tape TapeReader --auth-id 'tape-admin@pbs'
 
 # create the API token (the secret is only ever shown here -- save it now)
 proxmox-backup-manager user generate-token tape-admin@pbs tape-reader \
