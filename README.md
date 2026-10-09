@@ -4,6 +4,18 @@ Tracks tape media leaving and returning to your Proxmox Backup Server tape
 library, stages exported tapes in the changer's mailslots, and emails the
 operator when tapes need to be picked up or are overdue to come back.
 
+Features
+- Selects and move tapes to mailslots for external storage
+- Monitors single or multiple mediapools for full tapes to process
+- Send mail requesting which tapes to return
+- Monitor read/write errors
+- Monitor wearing of tapes
+- Optional autoclean tape drive if needed
+- Automatic upgrade of database
+- Don't do anything if an other tape is in the drive
+- Logging of every event
+- Only TapeReader token permission needed on PBS
+ 
 ## Setup
 
 ### 1. Create the PBS user, API token, and permissions
@@ -38,12 +50,7 @@ again with the new role.
 > **Note on the `TapeReader` role:** per PBS's built-in roles, `TapeReader`
 > is described as "can read and inspect tape configuration and media
 > content" — it's not explicitly documented as covering the *write*
-> actions this tool performs (`load-media`, `unload`, `clean`). If
-> `process-exports` fails with a permission error, re-run the `acl update`
-> above with `TapeOperator` instead ("can do tape backup/restore, cannot
-> change configuration") — that's the smallest built-in role PBS documents
-> as covering physical tape operations. `TapeAdmin` also works but grants
-> configuration-changing rights this tool doesn't need.
+> actions this tool performs (`load-media`, `unload`, `clean`).
 
 ### 2. Configure the tool
 
