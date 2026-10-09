@@ -49,7 +49,7 @@ def connect_pbs(cfg):
         user=p["user"],
         verify_ssl=p.getboolean("verify_ssl", fallback=True),
         port=p.getint("port", fallback=8007),
-        timeout=p.getint("api_timeout_seconds", fallback=30),
+        timeout=p.getint("api_timeout_seconds", fallback=60),
     )
     return pbs_client.PBSTape(
         prox,
@@ -99,6 +99,9 @@ def do_sync(conn, tape, cfg, verbose=True):
     # library instead of sitting in a mailslot indefinitely (which would
     # also make that mailslot unavailable for the next export).
     known_before = {t["label"]: t for t in db.all_tapes(conn)}
+    claimed_slots = set()  # storage slots we've already moved a tape into this run
+    # (the `status` snapshot above doesn't change as we transfer, so without
+    # this every returned tape would be sent to the same "first free" slot)
     stuck_in_mailslot = set()  # relocation failed -- must NOT be treated as a normal 'present' tape below
     for label, slot in list(present.items()):
         if slot not in export_slots:
@@ -107,7 +110,7 @@ def do_sync(conn, tape, cfg, verbose=True):
         if row is not None and row["media_location"] == "exported_pending_pickup":
             continue  # we deliberately staged this one for pickup -- leave it alone
 
-        free_slot = pbs_client.find_free_storage_slot(status, export_slots)
+        free_slot = pbs_client.find_free_storage_slot(status, export_slots, exclude=claimed_slots)
         if free_slot is None:
             db.log_event(conn, label, "error",
                           f"tape found in mailslot {slot} but no free storage slot to relocate it to")
@@ -120,6 +123,7 @@ def do_sync(conn, tape, cfg, verbose=True):
             print(f"[sync] {label}: found in mailslot {slot} (returned tape), "
                   f"moving to storage slot {free_slot}")
         tape.transfer(slot, free_slot)
+        claimed_slots.add(free_slot)
         db.log_event(conn, label, "moved_from_mailslot",
                       f"moved from mailslot {slot} to storage slot {free_slot}")
 

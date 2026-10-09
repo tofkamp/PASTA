@@ -237,12 +237,16 @@ def find_free_export_slot(status, export_slots):
     return None
 
 
-def find_free_storage_slot(status, export_slots):
+def find_free_storage_slot(status, export_slots, exclude=()):
     """The mirror of find_free_export_slot: return the first empty *storage*
     slot (i.e. any slot the changer reports that is NOT one of the
     configured mailslot numbers), for relocating a returned tape out of a
-    mailslot into the library proper."""
-    occupied_slots = set()
+    mailslot into the library proper.
+
+    `exclude` lists slots that are already spoken for even though the
+    (possibly stale) `status` snapshot still shows them empty -- e.g. slots
+    we moved a tape into earlier in the same sync run."""
+    occupied_slots = set(exclude)
     all_slots = set()
     for entry in status:
         slot = entry.get("entry-id") or entry.get("slot") or entry.get("entry_id")
@@ -336,5 +340,10 @@ def extract_error_counters(volume_statistics):
     for k, v in volume_statistics.items():
         if "error" not in k.lower():
             continue
-        result[k] = v
+        key = k
+        if key.startswith("volume_"):
+            key = key[len("volume_"):]
+        elif key.startswith("volume-"):
+            key = key[len("volume-"):]
+        result[key] = v
     return result

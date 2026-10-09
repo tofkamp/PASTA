@@ -1,34 +1,21 @@
-# PBS Assistance Service for Tape Administration
-(PBS Tape Administration Tool)
+# PBS Tape Administration Tool
 
 Tracks tape media leaving and returning to your Proxmox Backup Server tape
 library, stages exported tapes in the changer's mailslots, and emails the
 operator when tapes need to be picked up or are overdue to come back.
 
-Features
-- Selects and move tapes to mailslots for external storage
-- Monitors single or multiple mediapools for full tapes to process
-- Send mail requesting which tapes to return
-- Monitor read/write errors
-- Monitor wearing of tapes
-- Optional autoclean tape drive if needed
-- Automatic upgrade of database
-- Don't do anything if an other tape is in the drive
-- Logging of every event
-- Only TapeReader token permission needed on PBX
- 
 ## Setup
 
 ### 1. Create the PBS user, API token, and permissions
 
 Run these on the PBS host itself (as root, or via `pveproxy`/`pbs` shell
-access). 
+access). Note this uses `proxmox-backup-manager`, not `proxmox-tape` —
+`proxmox-tape` is only for tape drive/media operations; user, token, and
+ACL management live in `proxmox-backup-manager`.
 
 ```bash
 # create a dedicated user to hold the token
 proxmox-backup-manager user create tape-admin@pbs --email tape-admin@example.com
-# grant the user the TapeReader role on /tape
-proxmox-backup-manager acl update /tape TapeReader --auth-id 'tape-admin@pbs'
 
 # create the API token (the secret is only ever shown here -- save it now)
 proxmox-backup-manager user generate-token tape-admin@pbs tape-reader \
@@ -37,8 +24,26 @@ proxmox-backup-manager user generate-token tape-admin@pbs tape-reader \
 
 # grant the token the TapeReader role on /tape
 proxmox-backup-manager acl update /tape TapeReader --auth-id 'tape-admin@pbs!tape-reader'
+
+# grant the user the TapeReader role on /tape
+proxmox-backup-manager acl update /tape TapeReader --auth-id 'tape-admin@pbs'
 ```
 
+Both ACL commands are needed: an API token's effective permissions are
+limited to those of the user it belongs to, so the user must hold the role
+as well as the token. With only the token's entry, the API calls fail. If
+you later switch to `TapeOperator` (see the note below), run both commands
+again with the new role.
+
+> **Note on the `TapeReader` role:** per PBS's built-in roles, `TapeReader`
+> is described as "can read and inspect tape configuration and media
+> content" — it's not explicitly documented as covering the *write*
+> actions this tool performs (`load-media`, `unload`, `clean`). If
+> `process-exports` fails with a permission error, re-run the `acl update`
+> above with `TapeOperator` instead ("can do tape backup/restore, cannot
+> change configuration") — that's the smallest built-in role PBS documents
+> as covering physical tape operations. `TapeAdmin` also works but grants
+> configuration-changing rights this tool doesn't need.
 
 ### 2. Configure the tool
 
@@ -92,7 +97,7 @@ everything).
 ## Suggested cron
 
 ```cron
-45 7 * * *  cd /opt/tape_admin && ./tape_admin.py run        >> run.log 2>&1
+*/15 * * * *  cd /opt/tape_admin && ./tape_admin.py run        >> run.log 2>&1
 0 8   * * *   cd /opt/tape_admin && ./tape_admin.py check-overdue >> run.log 2>&1
 ```
 
@@ -103,9 +108,8 @@ re-sent once every `notify_cooldown_days` (default 1 day) per tape.
 
 ## How tape lifecycle is tracked
 
-```mermaid
-graph
-A(unknown) --> B[in_library] --> C[exported_pending_pickup] --> D[external] --> E[returned] --> B
+```
+unknown -> in_library -> exported_pending_pickup -> external -> returned -> in_library -> ...
 ```
 
 - **in_library**: seen in a changer slot or drive right now.
