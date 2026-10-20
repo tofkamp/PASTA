@@ -33,6 +33,7 @@ which is a different mechanism from addressing a hyphenated path *segment*.
 
 from proxmoxer import ProxmoxAPI
 
+import random
 import re
 import time
 
@@ -237,7 +238,10 @@ def find_free_export_slot(status, export_slots):
     return None
 
 
-def find_free_storage_slot(status, export_slots, exclude=()):
+SLOT_STRATEGIES = ("first", "random")
+
+
+def find_free_storage_slot(status, export_slots, exclude=(), strategy="first"):
     """The mirror of find_free_export_slot: return the first empty *storage*
     slot (i.e. any slot the changer reports that is NOT one of the
     configured mailslot numbers), for relocating a returned tape out of a
@@ -245,7 +249,12 @@ def find_free_storage_slot(status, export_slots, exclude=()):
 
     `exclude` lists slots that are already spoken for even though the
     (possibly stale) `status` snapshot still shows them empty -- e.g. slots
-    we moved a tape into earlier in the same sync run."""
+    we moved a tape into earlier in the same sync run.
+
+    `strategy` is 'first' (lowest-numbered free slot) or 'random' (any free
+    slot, picked at random)."""
+    if strategy not in SLOT_STRATEGIES:
+        raise ValueError(f"unknown storage slot strategy {strategy!r}, expected one of {SLOT_STRATEGIES}")
     occupied_slots = set(exclude)
     all_slots = set()
     for entry in status:
@@ -256,11 +265,12 @@ def find_free_storage_slot(status, export_slots, exclude=()):
         label = entry.get("label-text") or entry.get("label_text")
         if label:
             occupied_slots.add(slot)
-    storage_slots = sorted(s for s in all_slots if s not in export_slots)
-    for slot in storage_slots:
-        if slot not in occupied_slots:
-            return slot
-    return None
+    free_slots = sorted(s for s in all_slots if s not in export_slots and s not in occupied_slots)
+    if not free_slots:
+        return None
+    if strategy == "random":
+        return random.choice(free_slots)
+    return free_slots[0]
 
 
 # ---------------------------------------------------------------------------

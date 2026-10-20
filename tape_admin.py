@@ -72,6 +72,10 @@ def get_verbose(cfg):
 def do_sync(conn, tape, cfg, verbose=True):
     arrived = []
     export_slots = [int(s) for s in cfg["pbs"]["export_slots"].split(",")]
+    slot_strategy = cfg["pbs"].get("storage_slot_selection", "first").strip().lower()
+    if slot_strategy not in pbs_client.SLOT_STRATEGIES:
+        sys.exit(f"config.ini [pbs] storage_slot_selection must be one of "
+                 f"{', '.join(pbs_client.SLOT_STRATEGIES)} (got {slot_strategy!r})")
 
     # 1. Pull in everything PBS knows about each tape (pool, status, expired flag)
     for entry in tape.media_list():
@@ -107,10 +111,19 @@ def do_sync(conn, tape, cfg, verbose=True):
         if slot not in export_slots:
             continue
         row = known_before.get(label)
+        export_cancelled = False
         if row is not None and row["media_location"] == "exported_pending_pickup":
-            continue  # we deliberately staged this one for pickup -- leave it alone
+            if not row["pbs_expired"]:
+                if verbose:
+                    print(f"[sync] {label}: in mailslot {slot}, waiting for pickup")
+                continue  # we deliberately staged this one for pickup -- leave it alone
+            # It expired while waiting (or should never have been staged): an
+            # expired tape is ready for reuse and doesn't need to go offsite,
+            # so cancel the pickup and shelve it like any other returned tape.
+            export_cancelled = True
 
-        free_slot = pbs_client.find_free_storage_slot(status, export_slots, exclude=claimed_slots)
+        free_slot = pbs_client.find_free_storage_slot(status, export_slots, exclude=claimed_slots,
+                                                    strategy=slot_strategy)
         if free_slot is None:
             db.log_event(conn, label, "error",
                           f"tape found in mailslot {slot} but no free storage slot to relocate it to")
@@ -130,12 +143,16 @@ def do_sync(conn, tape, cfg, verbose=True):
         if row is None:
             db.ensure_tape_row(conn, label)
             db.log_event(conn, label, "inserted", "first seen via mailslot, moved into library")
+        if export_cancelled:
+            db.log_event(conn, label, "export_cancelled",
+                          "tape is expired (ready for reuse) -- pickup cancelled, shelved in the library")
 
         if was_external:
             too_early = not row["pbs_expired"] and not row["last_overdue_notify"]
             db.set_location(conn, label, "returned", slot=free_slot,
                              extra_sql=", last_return_time = ?", extra_params=(db.now_iso(),))
             db.log_event(conn, label, "returned", "tape detected back in library (via mailslot)")
+            db.set_auto_export_blocked(conn, label, True)
             arrived.append({"label": label, "pool": row.get("pool"), "too_early": too_early})
             if verbose and too_early:
                 print(f"[sync] {label}: WARNING: returned too early")
@@ -143,6 +160,7 @@ def do_sync(conn, tape, cfg, verbose=True):
                 db.log_event(conn, label, "returned_too_early",
                               "not PBS-expired and never sent an overdue notice for this tape")
         else:
+            db.set_auto_export_blocked(conn, label, True)  # imported tape: don't auto-export it right away
             db.set_location(conn, label, "in_library", slot=free_slot,
                              extra_sql=", last_seen_in_library = ?", extra_params=(db.now_iso(),))
 
@@ -154,11 +172,13 @@ def do_sync(conn, tape, cfg, verbose=True):
     # excluded here -- they're physically present, but not actually "back
     # in the library" in any meaningful sense, so leave their tracked state
     # as-is (still 'external') until a free storage slot lets sync move them.
-    present_labels = (set(present) | set(in_drive)) - stuck_in_mailslot
+    present_labels = set(present) | set(in_drive)
     known = {t["label"]: t for t in db.all_tapes(conn)}
 
     for label, t in known.items():
         loc = t["media_location"]
+        if label in stuck_in_mailslot:
+            continue  # still physically in the mailslot: leave its tracked state exactly as it is
 
         if label in present_labels:
             slot = present.get(label)
@@ -166,6 +186,7 @@ def do_sync(conn, tape, cfg, verbose=True):
                 db.set_location(conn, label, "returned", slot=slot,
                                  extra_sql=", last_return_time = ?", extra_params=(db.now_iso(),))
                 db.log_event(conn, label, "returned", "tape detected back in library")
+                db.set_auto_export_blocked(conn, label, True)
 
                 # "Too early" = PBS doesn't consider it expired yet, and we
                 # never sent an overdue reminder asking for it back -- i.e.
@@ -241,8 +262,10 @@ def auto_flag_exports(conn, cfg):
         if (
             _pool_matches(pool_filter, t["pool"])
             and t["pbs_status"] == "full"
+            and not t["pbs_expired"]  # expired = ready for reuse; an expired tape still reports 'full'
             and t["media_location"] == "in_library"
             and not t["export_requested"]
+            and not t["auto_export_blocked"]
         ):
             db.mark_export_requested(conn, t["label"], True)
             db.log_event(conn, t["label"], "auto_flagged", f"full in auto-export pool {t['pool']}")

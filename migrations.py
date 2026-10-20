@@ -124,11 +124,30 @@ def _apply_0003_drive_diagnostics_columns(conn):
             conn.execute(f"ALTER TABLE tapes ADD COLUMN {column} {coltype}")
 
 
+def _apply_0004_auto_export_blocked(conn):
+    """auto_export_blocked: set when a tape returns to (or is imported into)
+    the library, so the auto-export rule doesn't immediately send it out
+    again. Cleared automatically once PBS stops reporting it as 'full'
+    (i.e. it has been reused)."""
+    if not _column_exists(conn, "tapes", "auto_export_blocked"):
+        conn.execute("ALTER TABLE tapes ADD COLUMN auto_export_blocked INTEGER DEFAULT 0")
+        # Backfill: tapes that already came back and are sitting full in the
+        # library must not be auto-exported by the very next run.
+        conn.execute(
+            """UPDATE tapes SET auto_export_blocked = 1
+               WHERE last_return_time IS NOT NULL
+                 AND media_location IN ('in_library', 'returned')
+                 AND pbs_status = 'full'"""
+        )
+
+
 MIGRATIONS = [
     Migration("0001", "Initial schema: tapes + events tables", _apply_0001_initial_schema),
     Migration("0002", "Add index on events.created_at for retention purges", _apply_0002_events_created_at_index),
     Migration("0003", "Add drive diagnostics columns to tapes (alert flags, wearout, error counters, cleaning)",
                _apply_0003_drive_diagnostics_columns),
+    Migration("0004", "Add auto_export_blocked to tapes (don't re-export tapes that just returned)",
+               _apply_0004_auto_export_blocked),
 ]
 
 

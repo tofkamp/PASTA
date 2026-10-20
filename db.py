@@ -72,10 +72,21 @@ def upsert_tape_known(conn, label, uuid=None, pool=None, pbs_status=None, pbs_ex
                                      pool = COALESCE(?, pool),
                                      pbs_status = COALESCE(?, pbs_status),
                                      pbs_expired = ?,
+                                     auto_export_blocked = CASE
+                                         WHEN ? IS NOT NULL AND ? != 'full' THEN 0
+                                         ELSE auto_export_blocked END,
                                      updated_at = ?
                    WHERE label = ?""",
-                (uuid, pool, pbs_status, int(bool(pbs_expired)), ts, label),
+                (uuid, pool, pbs_status, int(bool(pbs_expired)), pbs_status, pbs_status, ts, label),
             )
+
+
+def set_auto_export_blocked(conn, label, blocked=True):
+    with cursor(conn) as cur:
+        cur.execute(
+            "UPDATE tapes SET auto_export_blocked = ?, updated_at = ? WHERE label = ?",
+            (int(blocked), now_iso(), label),
+        )
 
 
 def set_location(conn, label, location, slot=None, extra_sql="", extra_params=()):
