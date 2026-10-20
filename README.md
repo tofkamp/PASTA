@@ -16,7 +16,7 @@ Features
 - Logging of every event
 - Only TapeReader token permission needed on PBS
  
-## Setup
+ ## Setup
 
 ### 1. Create the PBS user, API token, and permissions
 
@@ -50,7 +50,12 @@ again with the new role.
 > **Note on the `TapeReader` role:** per PBS's built-in roles, `TapeReader`
 > is described as "can read and inspect tape configuration and media
 > content" — it's not explicitly documented as covering the *write*
-> actions this tool performs (`load-media`, `unload`, `clean`).
+> actions this tool performs (`load-media`, `unload`, `clean`). If
+> `process-exports` fails with a permission error, re-run the `acl update`
+> above with `TapeOperator` instead ("can do tape backup/restore, cannot
+> change configuration") — that's the smallest built-in role PBS documents
+> as covering physical tape operations. `TapeAdmin` also works but grants
+> configuration-changing rights this tool doesn't need.
 
 ### 2. Configure the tool
 
@@ -278,6 +283,55 @@ safe to run against a database that's already partway upgraded (or, the
 first time you run this versioned code, a database created by an older,
 unversioned build — the existing tables/columns are detected and skipped,
 but still get correctly recorded as applied).
+
+## Expired tapes
+
+A tape that PBS reports as `expired` (pool retention passed) is ready for
+reuse, but it still shows status `full` until it is overwritten. Two rules
+follow from that:
+
+- **Auto-export never flags an expired tape.** An expired tape doesn't need
+  to go offsite. (`mark-export` still works if you really want it.)
+- **An expired tape waiting in a mailslot is shelved, not left for pickup.**
+  Normally `sync` leaves a tape in `exported_pending_pickup` state alone in
+  its mailslot. If that tape has expired in the meantime, `sync` cancels the
+  pickup (`export_cancelled` event) and moves it into a free storage slot.
+  Non-expired staged tapes keep waiting, and with `verbose = true` each run
+  prints `waiting for pickup` for them.
+
+A tape that can't be moved because no storage slot is free keeps its tracked
+state unchanged and is retried on the next run.
+
+### Which storage slot a returned tape goes to
+
+`config.ini [pbs] storage_slot_selection` chooses the destination slot:
+
+- `first` (the default when the line is absent) uses the lowest-numbered
+  free storage slot.
+- `random` picks any free storage slot at random. Tapes moved in the same
+  run never share a slot.
+
+Any other value stops the program with an error naming the setting.
+
+## Returned tapes are not auto-exported again
+
+A tape that comes back can still be `full`, for example when the
+`return_after_days` cap asked for it back after 30 days while its pool
+retention is 6 months, so it is not expired. Without a guard, the
+auto-export rule would see a full tape in an auto-export pool and send it
+straight out again, every time it returned.
+
+So any tape that returns to the library, or is imported through a mailslot,
+gets `auto_export_blocked = 1`. Auto-export skips blocked tapes. The block
+clears by itself as soon as PBS reports the tape as anything other than
+`full` (it has been reused), so it is auto-exported again once it fills up
+again. `mark-export LABEL` ignores the block, so you can always push a tape
+out by hand. This was added in schema migration `0004`, which also blocks
+tapes that already returned and are sitting full in the library.
+
+Note that a tape can only change from `full` if the sync happens to see it
+in another state. A full LTO-7 takes hours to write, so the 15-minute cron
+interval will catch it.
 
 ## Refusing to touch a drive that's already in use
 
